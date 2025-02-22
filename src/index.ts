@@ -46,6 +46,7 @@ interface ForexConfig {
   currencyLayerApiKey: string; // Free tier
   currencyFreaksApiKey: string; // Free tier
   fixerApiKey: string;
+  unirateApiKey: string;
 }
 
 interface RateWithSpread {
@@ -196,6 +197,7 @@ const FOREX_SOURCES = {
   ECB_API: "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml",
   CBR_API: "https://www.cbr.ru/scripts/XML_daily.asp",
   SNB_API: "https://www.snb.ch/selector/en/mmr/exfeed/rss",
+  UNIRATE_API: "https://api.unirateapi.com/api/rates",
 };
 
 // Function to determine if rate is stationary
@@ -635,6 +637,7 @@ async function updateAllRates(): Promise<void> {
       currencyLayerApiKey: process.env.CURRENCY_LAYER_API_KEY || "",
       currencyFreaksApiKey: process.env.CURRENCY_FREAKS_API_KEY || "",
       fixerApiKey: process.env.FIXER_API_KEY || "",
+      unirateApiKey: process.env.UNIRATE_API_KEY || "",
     };
 
     const rates = await aggregateForexRates(config);
@@ -655,6 +658,7 @@ app.get("/api/all-bananacrystal-rates", async (req, res) => {
       currencyLayerApiKey: process.env.CURRENCY_LAYER_API_KEY || "",
       currencyFreaksApiKey: process.env.CURRENCY_FREAKS_API_KEY || "",
       fixerApiKey: process.env.FIXER_API_KEY || "",
+      unirateApiKey: process.env.UNIRATE_API_KEY || "",
     };
 
     const rates = await aggregateForexRates(config);
@@ -1281,6 +1285,7 @@ async function aggregateForexRates(config: ForexConfig): Promise<ForexRate[]> {
       fetchCbrApi(),
       fetchSnbApi(),
       fetchCurrencyConverterAPI(),
+      fetchUniRateApi(config.unirateApiKey),
     ]);
 
     const rates = results
@@ -1442,6 +1447,37 @@ function removeOutliersWithSpread(rates: RateWithSpread[]): RateWithSpread[] {
   );
 }
 
+async function fetchUniRateApi(apiKey: string): Promise<ForexRate> {
+  try {
+    const response = await axios.get(
+      `${FOREX_SOURCES.UNIRATE_API}?api_key=${apiKey}&from=USD`
+    );
+
+    const rates: ForexRate["rates"] = {};
+
+    // Process each currency pair from the response
+    Object.entries(response.data.rates).forEach(([currency, rateData]) => {
+      // UniRate provides a single rate, so we'll add our standard spread
+      const baseRate = rateData as number;
+      const halfSpread = SPREAD_CONFIG.DEFAULT_SPREAD_PIPS / 10000 / 2;
+
+      rates[currency] = {
+        buyRate: baseRate * (1 - halfSpread),
+        sellRate: baseRate * (1 + halfSpread),
+      };
+    });
+
+    return {
+      source: "UniRate",
+      rates,
+      timestamp: Date.now(), // UniRate doesn't provide a timestamp, so we use current time
+    };
+  } catch (error) {
+    console.error("Error fetching from UniRate:", error);
+    throw error;
+  }
+}
+
 app.get("/api/consolidated-rate", async (req, res) => {
   try {
     const { fromCurrency, toCurrency } = RateRequestSchema.parse({
@@ -1454,6 +1490,7 @@ app.get("/api/consolidated-rate", async (req, res) => {
       currencyLayerApiKey: process.env.CURRENCY_LAYER_API_KEY || "",
       currencyFreaksApiKey: process.env.CURRENCY_FREAKS_API_KEY || "",
       fixerApiKey: process.env.FIXER_API_KEY || "",
+      unirateApiKey: process.env.UNIRATE_API_KEY || "",
     };
 
     const rates = await aggregateForexRates(config);
@@ -1480,6 +1517,7 @@ app.get("/api/forex-rates", async (req, res) => {
       currencyLayerApiKey: process.env.CURRENCY_LAYER_API_KEY || "",
       currencyFreaksApiKey: process.env.CURRENCY_FREAKS_API_KEY || "",
       fixerApiKey: process.env.FIXER_API_KEY || "",
+      unirateApiKey: process.env.UNIRATE_API_KEY || "",
     };
 
     const rates = await aggregateForexRates(config);
@@ -1507,6 +1545,7 @@ app.get("/api/bananacrystal-rate", async (req, res) => {
       currencyLayerApiKey: process.env.CURRENCY_LAYER_API_KEY || "",
       currencyFreaksApiKey: process.env.CURRENCY_FREAKS_API_KEY || "",
       fixerApiKey: process.env.FIXER_API_KEY || "",
+      unirateApiKey: process.env.UNIRATE_API_KEY || "",
     };
 
     const rates = await aggregateForexRates(config);

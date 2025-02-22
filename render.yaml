@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: fxrate-api
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FIXER_API_KEY
+        sync: false
+      - key: OPEN_EXCHANGE_RATES_API_KEY
+        sync: false
+      - key: CURRENCY_LAYER_API_KEY
+        sync: false
+      - key: ALPHA_VANTAGE_API_KEY
+        sync: false
+      - key: CURRENCY_FREAKS_API_KEY
+        sync: false
+      - key: COIN_LAYER
+        sync: false
+      - key: UNIRATE_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
