@@ -284,6 +284,70 @@ export class RateService {
     }
   }
 
+  async storeAllBananaCrystalRates(rates: AllBananaCrystalRates): Promise<void> {
+    try {
+      if (!this.supabase) {
+        console.warn('Supabase client not initialized. Skipping rate storage.');
+        return;
+      }
+
+      // Store each currency rate
+      for (const [currency, rate] of Object.entries(rates.rates)) {
+        // Get history for this currency
+        const { data: history, error: historyError } = await this.supabase
+          .from("all_bananacrystal_rates")
+          .select("*")
+          .eq("currency", currency)
+          .order("created_at", { ascending: false })
+          .limit(20);
+
+        if (historyError) throw historyError;
+
+        // Calculate stationarity if we have enough history
+        let isStationary = false;
+        if (history && history.length >= 2) {
+          const rateChanges = history
+            .slice(0, -1)
+            .map((record, index) => 
+              Math.abs((record.buy_rate + record.sell_rate) / 2 - 
+                      (history[index + 1].buy_rate + history[index + 1].sell_rate) / 2)
+            );
+          const avgChange = rateChanges.reduce((sum, change) => sum + change, 0) / rateChanges.length;
+          isStationary = avgChange < 0.001;
+        }
+
+        // Insert new record
+        const { error: insertError } = await this.supabase
+          .from("all_bananacrystal_rates")
+          .insert([{
+            currency,
+            buy_rate: rate.buyRate,
+            sell_rate: rate.sellRate,
+            confidence: rate.confidence,
+            volatility_index: rate.volatilityIndex,
+            is_stationary: isStationary
+          }]);
+
+        if (insertError) throw insertError;
+
+        // If we have more than 20 records, delete the oldest ones
+        if (history && history.length >= 20) {
+          const oldestToKeep = history[18].created_at; // Keep 19 old + 1 new = 20 total
+          const { error: deleteError } = await this.supabase
+            .from("all_bananacrystal_rates")
+            .delete()
+            .eq("currency", currency)
+            .lt("created_at", oldestToKeep);
+
+          if (deleteError) throw deleteError;
+        }
+      }
+    } catch (error) {
+      handleApiError(error, "storeAllBananaCrystalRates");
+      throw error;
+    }
+  }
+
   async getAllBananaCrystalRates(rates: ForexRate[]): Promise<AllBananaCrystalRates> {
     const startTime = Date.now();
     const currencyPairs = new Set<string>();
@@ -297,20 +361,19 @@ export class RateService {
       sourcesUsed.add(source.source);
     });
 
-    // Generate all possible pairs with USD as base
+    // Get all currencies except USD
     supportedCurrencies.forEach(currency => {
       if (currency !== BASE_CURRENCY) {
-        currencyPairs.add(`${BASE_CURRENCY}/${currency}`);
+        currencyPairs.add(currency);
       }
     });
 
-    // Calculate BananaCrystal rate for each pair
-    for (const pair of currencyPairs) {
-      const [fromCurrency, toCurrency] = pair.split('/');
+    // Calculate rates for each currency
+    for (const currency of currencyPairs) {
       try {
-        const rate = await this.calculateBananaCrystalRate(fromCurrency, toCurrency, rates);
+        const rate = await this.calculateBananaCrystalRate(BASE_CURRENCY, currency, rates);
         const validRates = rates
-          .map((source) => calculateCrossRateWithSpread(source.rates, fromCurrency, toCurrency))
+          .map((source) => calculateCrossRateWithSpread(source.rates, BASE_CURRENCY, currency))
           .filter((rate): rate is RateWithSpread => rate !== null);
 
         if (validRates.length > 0) {
@@ -318,22 +381,22 @@ export class RateService {
           const avgSellRate = validRates.reduce((sum, rate) => sum + rate.sellRate, 0) / validRates.length;
 
           if (rate) {
-            bananaCrystalRates[pair] = {
+            bananaCrystalRates[currency] = {
               buyRate: formatRate(avgBuyRate),
               sellRate: formatRate(avgSellRate),
-              bananaCrystalRate: rate.bananaCrystalRate,
               confidence: rate.confidence,
               volatilityIndex: rate.volatilityIndex
             };
           }
         }
       } catch (error) {
-        console.warn(`Failed to calculate rate for ${pair}:`, error);
+        console.warn(`Failed to calculate rate for ${currency}:`, error);
       }
     }
 
     return {
       timestamp: Date.now(),
+      base: "USD",
       rates: bananaCrystalRates,
       metadata: {
         sourcesUsed: Array.from(sourcesUsed),

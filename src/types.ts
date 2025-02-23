@@ -45,11 +45,11 @@ export interface RateHistory {
 
 export interface AllBananaCrystalRates {
   timestamp: number;
+  base: string;
   rates: {
-    [currencyPair: string]: {
+    [currency: string]: {
       buyRate: number;
       sellRate: number;
-      bananaCrystalRate: number;
       confidence: number;
       volatilityIndex: number;
     };
