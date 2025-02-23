@@ -62,10 +62,10 @@ export class RateService {
       apiService.fetchFxJsApi(),
       apiService.fetchNbpApi(),
       apiService.fetchCnbApi(),
-      apiService.fetchBocApi(),
+      //apiService.fetchBocApi(),
       apiService.fetchEcbApi(),
       //apiService.fetchCbrApi(),
-      apiService.fetchSnbApi(),
+      //apiService.fetchSnbApi(),
 
       // APIs requiring keys
       apiService.fetchOpenExchangeRates(config.openExchangeRatesApiKey),
