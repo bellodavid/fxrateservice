@@ -355,7 +355,8 @@ export class RateService {
     const sourcesUsed = new Set<string>();
     const supportedCurrencies = new Set<string>();
 
-    // Get all available currencies
+    // Get all available currencies and the last rate source (BananaCrystal rates)
+    const lastSource = rates[rates.length - 1];
     rates.forEach(source => {
       Object.keys(source.rates).forEach(currency => supportedCurrencies.add(currency));
       sourcesUsed.add(source.source);
@@ -371,23 +372,18 @@ export class RateService {
     // Calculate rates for each currency
     for (const currency of currencyPairs) {
       try {
-        const rate = await this.calculateBananaCrystalRate(BASE_CURRENCY, currency, rates);
-        const validRates = rates
-          .map((source) => calculateCrossRateWithSpread(source.rates, BASE_CURRENCY, currency))
-          .filter((rate): rate is RateWithSpread => rate !== null);
+        // Get rates from the last source (BananaCrystal rates)
+        const rate = lastSource.rates[currency];
+        if (rate) {
+          // Calculate BananaCrystal rate for confidence and volatility
+          const bananaCrystalRate = await this.calculateBananaCrystalRate(BASE_CURRENCY, currency, rates);
 
-        if (validRates.length > 0) {
-          const avgBuyRate = validRates.reduce((sum, rate) => sum + rate.buyRate, 0) / validRates.length;
-          const avgSellRate = validRates.reduce((sum, rate) => sum + rate.sellRate, 0) / validRates.length;
-
-          if (rate) {
-            bananaCrystalRates[currency] = {
-              buyRate: formatRate(avgBuyRate),
-              sellRate: formatRate(avgSellRate),
-              confidence: rate.confidence,
-              volatilityIndex: rate.volatilityIndex
-            };
-          }
+          bananaCrystalRates[currency] = {
+            buyRate: rate.buyRate,
+            sellRate: rate.sellRate,
+            confidence: bananaCrystalRate.confidence,
+            volatilityIndex: bananaCrystalRate.volatilityIndex
+          };
         }
       } catch (error) {
         console.warn(`Failed to calculate rate for ${currency}:`, error);
@@ -396,7 +392,7 @@ export class RateService {
 
     return {
       timestamp: Date.now(),
-      base: "USD",
+      base: BASE_CURRENCY,
       rates: bananaCrystalRates,
       metadata: {
         sourcesUsed: Array.from(sourcesUsed),
