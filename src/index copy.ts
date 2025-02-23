@@ -222,79 +222,70 @@ app.get("/api/rate-history", async (req, res) => {
   }
 });
 
-async function calculateBananaCrystalRate(
-  fromCurrency: string,
-  toCurrency: string,
+async function calculateAllBananaCrystalRates(
   rates: ForexRate[]
-): Promise<BananaCrystalRate> {
-  // Extract all valid rates and calculate their midpoint rates
-  const validRates = rates
-    .map((source) => {
-      const rate = calculateCrossRateWithSpread(
-        source.rates,
-        fromCurrency,
-        toCurrency
-      );
-      if (rate !== null) {
-        return {
-          source: source.source,
-          rate: (rate.buyRate + rate.sellRate) / 2, // Use midpoint rate
-          weight: 1, // Default weight, can be adjusted based on source reliability
+): Promise<AllBananaCrystalRates> {
+  const startTime = Date.now();
+  const sourcesUsed = new Set<string>();
+  const allRates: AllBananaCrystalRates["rates"] = {};
+
+  // Only calculate rates for major currency pairs to stay within limits
+  for (const toCurrency of MAJOR_CURRENCIES) {
+    if (toCurrency !== BASE_CURRENCY) {
+      try {
+        // Add delay between requests to avoid rate limiting
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        const bananaCrystalRate = await calculateBananaCrystalRate(
+          BASE_CURRENCY,
+          toCurrency,
+          rates
+        );
+
+        rates.forEach((source) => sourcesUsed.add(source.source));
+
+        const pairKey = `${BASE_CURRENCY}/${toCurrency}`;
+        allRates[pairKey] = {
+          fromCurrency: BASE_CURRENCY,
+          toCurrency,
+          bananaCrystalRate: bananaCrystalRate.bananaCrystalRate,
+          confidence: bananaCrystalRate.confidence,
+          volatilityIndex: bananaCrystalRate.volatilityIndex,
         };
+
+        // Validate currency codes before storing
+        if (BASE_CURRENCY.length === 3 && toCurrency.length === 3) {
+          await storeRateHistory(
+            BASE_CURRENCY,
+            toCurrency,
+            bananaCrystalRate.bananaCrystalRate,
+            bananaCrystalRate.confidence,
+            bananaCrystalRate.volatilityIndex
+          );
+        } else {
+          console.warn(
+            `Invalid currency code length: ${BASE_CURRENCY}/${toCurrency}`
+          );
+        }
+      } catch (error) {
+        console.error(
+          `Error calculating rate for ${BASE_CURRENCY}/${toCurrency}:`,
+          error
+        );
+        // Continue with next pair instead of failing completely
+        continue;
       }
-      return null;
-    })
-    .filter(
-      (rate): rate is { source: string; rate: number; weight: number } =>
-        rate !== null
-    );
-
-  if (validRates.length === 0) {
-    throw new Error(`No valid rates found for ${fromCurrency}/${toCurrency}`);
+    }
   }
-
-  // Calculate weighted average and standard deviation
-  const totalWeight = validRates.reduce((sum, rate) => sum + rate.weight, 0);
-  const weightedSum = validRates.reduce(
-    (sum, rate) => sum + rate.rate * rate.weight,
-    0
-  );
-  const weightedAverage = weightedSum / totalWeight;
-
-  // Calculate standard deviation
-  const squaredDiffs = validRates.map(
-    (rate) => Math.pow(rate.rate - weightedAverage, 2) * rate.weight
-  );
-  const standardDeviation = Math.sqrt(
-    squaredDiffs.reduce((sum, diff) => sum + diff, 0) / totalWeight
-  );
-
-  // Calculate confidence score (inverse of coefficient of variation)
-  const confidenceScore = Math.min(
-    100,
-    (1 - standardDeviation / weightedAverage) * 100
-  );
-
-  // Calculate volatility index (normalized standard deviation)
-  const volatilityIndex = (standardDeviation / weightedAverage) * 100;
-
   return {
-    fromCurrency,
-    toCurrency,
-    bananaCrystalRate: Number(weightedAverage.toFixed(6)),
-    confidence: Number(confidenceScore.toFixed(2)),
-    volatilityIndex: Number(volatilityIndex.toFixed(2)),
+    timestamp: Date.now(),
+    rates: allRates,
     metadata: {
-      sourcesUsed: validRates.map((r) => r.source),
-      timestamp: Date.now(),
-      standardDeviation: Number(standardDeviation.toFixed(6)),
-      sampleSize: validRates.length,
-      individualRates: validRates.map((r) => ({
-        source: r.source,
-        rate: Number(r.rate.toFixed(6)),
-        weight: r.weight,
-      })),
-      lastUpdated: new Date().toISOString(),
+      sourcesUsed: Array.from(sourcesUsed),
+      totalPairs: Object.keys(allRates).length,
+      updateDuration: Date.now() - startTime,
+      baseCurrency: BASE_CURRENCY,
+      supportedCurrencies: MAJOR_CURRENCIES,
     },
   };
 }
@@ -510,6 +501,27 @@ async function fetchEcbApi(): Promise<ForexRate> {
   }
 }
 
+async function updateAllRates(): Promise<void> {
+  try {
+    console.log("Starting periodic rate update...");
+    const config: ForexConfig = {
+      openExchangeRatesApiKey: process.env.OPEN_EXCHANGE_RATES_API_KEY || "",
+      currencyLayerApiKey: process.env.CURRENCY_LAYER_API_KEY || "",
+      currencyFreaksApiKey: process.env.CURRENCY_FREAKS_API_KEY || "",
+      fixerApiKey: process.env.FIXER_API_KEY || "",
+      unirateApiKey: process.env.UNIRATE_API_KEY || "",
+    };
+
+    const rates = await aggregateForexRates(config);
+    await calculateAllBananaCrystalRates(rates);
+    console.log("Periodic rate update completed successfully");
+  } catch (error) {
+    console.error("Error during periodic rate update:", error);
+    // Implement retry logic if needed
+    // await retryUpdate();
+  }
+}
+
 // New endpoint for all BananaCrystal rates
 app.get("/api/all-bananacrystal-rates", async (req, res) => {
   try {
@@ -519,7 +531,6 @@ app.get("/api/all-bananacrystal-rates", async (req, res) => {
       currencyFreaksApiKey: process.env.CURRENCY_FREAKS_API_KEY || "",
       fixerApiKey: process.env.FIXER_API_KEY || "",
       unirateApiKey: process.env.UNIRATE_API_KEY || "",
-      alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY || "",
     };
 
     const rates = await aggregateForexRates(config);
@@ -1001,6 +1012,83 @@ async function fetchBocApi(): Promise<ForexRate> {
   }
 }
 
+async function calculateBananaCrystalRate(
+  fromCurrency: string,
+  toCurrency: string,
+  rates: ForexRate[]
+): Promise<BananaCrystalRate> {
+  // Extract all valid rates and calculate their midpoint rates
+  const validRates = rates
+    .map((source) => {
+      const rate = calculateCrossRateWithSpread(
+        source.rates,
+        fromCurrency,
+        toCurrency
+      );
+      if (rate !== null) {
+        return {
+          source: source.source,
+          rate: (rate.buyRate + rate.sellRate) / 2, // Use midpoint rate
+          weight: 1, // Default weight, can be adjusted based on source reliability
+        };
+      }
+      return null;
+    })
+    .filter(
+      (rate): rate is { source: string; rate: number; weight: number } =>
+        rate !== null
+    );
+
+  if (validRates.length === 0) {
+    throw new Error(`No valid rates found for ${fromCurrency}/${toCurrency}`);
+  }
+
+  // Calculate weighted average and standard deviation
+  const totalWeight = validRates.reduce((sum, rate) => sum + rate.weight, 0);
+  const weightedSum = validRates.reduce(
+    (sum, rate) => sum + rate.rate * rate.weight,
+    0
+  );
+  const weightedAverage = weightedSum / totalWeight;
+
+  // Calculate standard deviation
+  const squaredDiffs = validRates.map(
+    (rate) => Math.pow(rate.rate - weightedAverage, 2) * rate.weight
+  );
+  const standardDeviation = Math.sqrt(
+    squaredDiffs.reduce((sum, diff) => sum + diff, 0) / totalWeight
+  );
+
+  // Calculate confidence score (inverse of coefficient of variation)
+  const confidenceScore = Math.min(
+    100,
+    (1 - standardDeviation / weightedAverage) * 100
+  );
+
+  // Calculate volatility index (normalized standard deviation)
+  const volatilityIndex = (standardDeviation / weightedAverage) * 100;
+
+  return {
+    fromCurrency,
+    toCurrency,
+    bananaCrystalRate: Number(weightedAverage.toFixed(6)),
+    confidence: Number(confidenceScore.toFixed(2)),
+    volatilityIndex: Number(volatilityIndex.toFixed(2)),
+    metadata: {
+      sourcesUsed: validRates.map((r) => r.source),
+      timestamp: Date.now(),
+      standardDeviation: Number(standardDeviation.toFixed(6)),
+      sampleSize: validRates.length,
+      individualRates: validRates.map((r) => ({
+        source: r.source,
+        rate: Number(r.rate.toFixed(6)),
+        weight: r.weight,
+      })),
+      lastUpdated: new Date().toISOString(),
+    },
+  };
+}
+
 async function fetchFixerIO(apiKey: string): Promise<ForexRate> {
   try {
     const response = await axios.get(
@@ -1085,19 +1173,10 @@ async function fetchAlphaVantage(
   toCurrency: string
 ): Promise<ForexRate> {
   try {
-    if (!apiKey) {
-      throw new Error("AlphaVantage API key not provided");
-    }
-
     const response = await axios.get(
       `${FOREX_SOURCES.ALPHA_VANTAGE}&from_currency=${fromCurrency}&to_currency=${toCurrency}&apikey=${apiKey}`
     );
-
-    if (response.data["Error Message"]) {
-      throw new Error(response.data["Error Message"]);
-    }
-
-    const exchangeRate = parseFloat(
+    const baseRate = parseFloat(
       response.data["Realtime Currency Exchange Rate"]["5. Exchange Rate"]
     );
     const halfSpread = SPREAD_CONFIG.DEFAULT_SPREAD_PIPS / 10000 / 2;
@@ -1106,83 +1185,55 @@ async function fetchAlphaVantage(
       source: "AlphaVantage",
       rates: {
         [toCurrency]: {
-          buyRate: exchangeRate * (1 - halfSpread),
-          sellRate: exchangeRate * (1 + halfSpread),
+          buyRate: baseRate * (1 - halfSpread),
+          sellRate: baseRate * (1 + halfSpread),
         },
       },
-      timestamp: Date.now(),
+      timestamp: new Date().getTime(),
     };
   } catch (error) {
-    console.error(
-      `Error fetching from AlphaVantage for ${fromCurrency}/${toCurrency}:`,
-      error
-    );
-    return {
-      source: "AlphaVantage",
-      rates: {},
-      timestamp: Date.now(),
-    };
+    console.error("Error fetching from AlphaVantage:", error);
+    throw error;
   }
 }
 
 async function aggregateForexRates(config: ForexConfig): Promise<ForexRate[]> {
   try {
-    // Add major currencies for AlphaVantage queries
-    const majorPairs = MAJOR_CURRENCIES.map((currency) => ({
-      fromCurrency: "USD",
-      toCurrency: currency,
-    }));
-
     const results = await Promise.allSettled([
+      // Your existing APIs
       fetchExchangeRateAPI(),
       fetchFrankfurter(),
       fetchCurrencyAPI(),
-      //fetchExchangeRateHost(),
+      fetchExchangeRateHost(),
       fetchOpenExchangeRates(config.openExchangeRatesApiKey),
       fetchCurrencyLayer(config.currencyLayerApiKey),
-      //fetchCurrencyFreaks(config.currencyFreaksApiKey),
+      fetchCurrencyFreaks(config.currencyFreaksApiKey),
       fetchFixerIO(config.fixerApiKey),
+
+      // Additional free APIs
+
       fetchFloatRates(),
       fetchFxJsApi(),
       fetchNbpApi(),
       fetchCnbApi(),
       fetchBocApi(),
+
+      // Previous additional APIs
       fetchExchangeRateIO(),
       fetchEcbApi(),
       fetchCbrApi(),
       fetchSnbApi(),
       fetchCurrencyConverterAPI(),
-      // Properly include UniRate
-      config.unirateApiKey
-        ? fetchUniRateApi(config.unirateApiKey)
-        : Promise.reject("No UniRate API key"),
+      fetchUniRateApi(config.unirateApiKey),
     ]);
 
-    // Process results and combine AlphaVantage rates
     const rates = results
       .filter(
         (result): result is PromiseFulfilledResult<ForexRate> =>
           result.status === "fulfilled"
       )
-      .map((result) => result.value)
-      .reduce((acc, curr) => {
-        if (curr.source === "AlphaVantage") {
-          // If it's AlphaVantage, merge the rates
-          const existingAlphaVantage = acc.find(
-            (r) => r.source === "AlphaVantage"
-          );
-          if (existingAlphaVantage) {
-            existingAlphaVantage.rates = {
-              ...existingAlphaVantage.rates,
-              ...curr.rates,
-            };
-            return acc;
-          }
-        }
-        return [...acc, curr];
-      }, [] as ForexRate[]);
+      .map((result) => result.value);
 
-    // Add BananaCrystal rates
     const bananaCrystalRates = await fetchBananaCrystalRates(rates);
     return [...rates, bananaCrystalRates];
   } catch (error) {
@@ -1337,23 +1388,15 @@ function removeOutliersWithSpread(rates: RateWithSpread[]): RateWithSpread[] {
 
 async function fetchUniRateApi(apiKey: string): Promise<ForexRate> {
   try {
-    if (!apiKey) {
-      throw new Error("UniRate API key not provided");
-    }
-
     const response = await axios.get(
-      `${FOREX_SOURCES.UNIRATE_API}?api_key=${apiKey}&from=USD`,
-      {
-        timeout: 10000, // 10 second timeout
-      }
+      `${FOREX_SOURCES.UNIRATE_API}?api_key=${apiKey}&from=USD`
     );
 
-    if (response.data.error) {
-      throw new Error(response.data.error);
-    }
-
     const rates: ForexRate["rates"] = {};
+
+    // Process each currency pair from the response
     Object.entries(response.data.rates).forEach(([currency, rateData]) => {
+      // UniRate provides a single rate, so we'll add our standard spread
       const baseRate = rateData as number;
       const halfSpread = SPREAD_CONFIG.DEFAULT_SPREAD_PIPS / 10000 / 2;
 
@@ -1366,15 +1409,11 @@ async function fetchUniRateApi(apiKey: string): Promise<ForexRate> {
     return {
       source: "UniRate",
       rates,
-      timestamp: Date.now(),
+      timestamp: Date.now(), // UniRate doesn't provide a timestamp, so we use current time
     };
   } catch (error) {
     console.error("Error fetching from UniRate:", error);
-    return {
-      source: "UniRate",
-      rates: {},
-      timestamp: Date.now(),
-    };
+    throw error;
   }
 }
 
@@ -1391,7 +1430,6 @@ app.get("/api/consolidated-rate", async (req, res) => {
       currencyFreaksApiKey: process.env.CURRENCY_FREAKS_API_KEY || "",
       fixerApiKey: process.env.FIXER_API_KEY || "",
       unirateApiKey: process.env.UNIRATE_API_KEY || "",
-      alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY || "",
     };
 
     const rates = await aggregateForexRates(config);
@@ -1419,7 +1457,6 @@ app.get("/api/forex-rates", async (req, res) => {
       currencyFreaksApiKey: process.env.CURRENCY_FREAKS_API_KEY || "",
       fixerApiKey: process.env.FIXER_API_KEY || "",
       unirateApiKey: process.env.UNIRATE_API_KEY || "",
-      alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY || "",
     };
 
     const rates = await aggregateForexRates(config);
@@ -1432,6 +1469,7 @@ app.get("/api/forex-rates", async (req, res) => {
 app.listen(port, async () => {
   console.log(`Forex rate aggregator running on port ${port}`);
   // Perform initial update when server starts
+  await updateAllRates();
 });
 
 app.get("/api/bananacrystal-rate", async (req, res) => {
@@ -1447,7 +1485,6 @@ app.get("/api/bananacrystal-rate", async (req, res) => {
       currencyFreaksApiKey: process.env.CURRENCY_FREAKS_API_KEY || "",
       fixerApiKey: process.env.FIXER_API_KEY || "",
       unirateApiKey: process.env.UNIRATE_API_KEY || "",
-      alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY || "",
     };
 
     const rates = await aggregateForexRates(config);
@@ -1457,21 +1494,21 @@ app.get("/api/bananacrystal-rate", async (req, res) => {
       rates
     );
 
+    // Store the rate history
+    await storeRateHistory(
+      fromCurrency,
+      toCurrency,
+      bananaCrystalRate.bananaCrystalRate,
+      bananaCrystalRate.confidence,
+      bananaCrystalRate.volatilityIndex
+    );
+
     res.json(bananaCrystalRate);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      res.status(400).json({
-        error: "Invalid currency codes provided",
-        message:
-          "Please provide valid 3-letter currency codes (e.g., USD, EUR, NGN)",
-      });
+      res.status(400).json({ error: "Invalid currency codes provided" });
     } else {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error occurred";
-      res.status(500).json({
-        error: "Failed to fetch BananaCrystal rate",
-        message: errorMessage,
-      });
+      res.status(500).json({ error: "Failed to fetch BananaCrystal rate" });
     }
   }
 });

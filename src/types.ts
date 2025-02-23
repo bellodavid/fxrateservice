@@ -12,12 +12,13 @@ export interface ForexRate {
 }
 
 export interface ForexConfig {
-  openExchangeRatesApiKey: string; // Free tier
-  currencyLayerApiKey: string; // Free tier
-  currencyFreaksApiKey: string; // Free tier
-  fixerApiKey: string;
-  unirateApiKey: string;
-}
+    openExchangeRatesApiKey: string;
+    currencyLayerApiKey: string;
+    currencyFreaksApiKey: string;
+    fixerApiKey: string;
+    unirateApiKey: string;
+    alphaVantageApiKey: string;
+  }
 
 export interface RateWithSpread {
   source: string;
