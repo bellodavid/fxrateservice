@@ -1,24 +1,28 @@
-// Enhanced types to include buyRate/sellRate
 export interface ForexRate {
   source: string;
   rates: {
     [key: string]: {
       buyRate: number;
       sellRate: number;
-      bananaCrystalRate?: number; // Optional as some direct API responses won't have this
+      bananaCrystalRate?: number;
     };
   };
   timestamp: number;
 }
 
 export interface ForexConfig {
-    openExchangeRatesApiKey: string;
-    currencyLayerApiKey: string;
-    currencyFreaksApiKey: string;
-    fixerApiKey: string;
-    unirateApiKey: string;
-    alphaVantageApiKey: string;
-  }
+  openExchangeRatesApiKey: string;
+  currencyLayerApiKey: string;
+  currencyFreaksApiKey: string;
+  fixerApiKey: string;
+  unirateApiKey: string;
+  alphaVantageApiKey: string;
+  currencyBeaconApiKey: string;
+  marketStackApiKey: string;
+  xeApiId: string;
+  xeApiKey: string;
+  fxApiKey: string;
+}
 
 export interface RateWithSpread {
   source: string;
@@ -28,7 +32,6 @@ export interface RateWithSpread {
   bananaCrystalRate: number;
 }
 
-// Types for rate history
 export interface RateHistory {
   id: number;
   from_currency: string;
@@ -44,8 +47,8 @@ export interface AllBananaCrystalRates {
   timestamp: number;
   rates: {
     [currencyPair: string]: {
-      fromCurrency: string;
-      toCurrency: string;
+      buyRate: number;
+      sellRate: number;
       bananaCrystalRate: number;
       confidence: number;
       volatilityIndex: number;
@@ -59,6 +62,7 @@ export interface AllBananaCrystalRates {
     supportedCurrencies: string[];
   };
 }
+
 export interface ConsolidatedRate {
   fromCurrency: string;
   toCurrency: string;
