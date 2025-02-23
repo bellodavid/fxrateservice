@@ -64,7 +64,7 @@ export class RateService {
       apiService.fetchCnbApi(),
       apiService.fetchBocApi(),
       apiService.fetchEcbApi(),
-      apiService.fetchCbrApi(),
+      //apiService.fetchCbrApi(),
       apiService.fetchSnbApi(),
 
       // APIs requiring keys
