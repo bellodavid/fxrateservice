@@ -43,9 +43,9 @@ export const FOREX_SOURCES = {
   SNB_API: "https://www.snb.ch/selector/en/mmr/exfeed/rss",
   UNIRATE_API: "https://api.unirateapi.com/api/rates",
   CURRENCY_BEACON: "https://api.currencybeacon.com/v1/latest",
-  MARKET_STACK: "http://api.marketstack.com/v1/exchanges",
+  MARKET_STACK: "https://api.marketstack.com/v1/latest",
   XE_API: "https://xecdapi.xe.com/v1/convert_from",
-  FX_API: "https://api.fxapi.com/v1/latest",
+  FX_API: "https://api.fxapi.com/v1/latest"
 };
 
 export const CORS_CONFIG = {
